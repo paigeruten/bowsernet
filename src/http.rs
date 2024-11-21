@@ -10,6 +10,9 @@ use std::{
 
 use crate::Url;
 
+const HTTP_VERSION: &str = "1.1";
+const USER_AGENT: &str = "bowsernet 0.00001";
+
 pub fn request(url: &Url) -> color_eyre::Result<String> {
     let stream = if url.scheme == "https" {
         connect_https(url)?
@@ -18,9 +21,13 @@ pub fn request(url: &Url) -> color_eyre::Result<String> {
     };
     let mut r = BufReader::new(stream);
 
-    write!(r.get_mut(), "GET {} HTTP/1.0\r\n", url.path)?;
-    write!(r.get_mut(), "Host: {}\r\n", url.host)?;
-    write!(r.get_mut(), "\r\n")?;
+    let request_headers = Headers::new()
+        .add("Host", &url.host)
+        .add("Connection", "close")
+        .add("User-Agent", USER_AGENT);
+
+    write!(r.get_mut(), "GET {} HTTP/{}\r\n", url.path, HTTP_VERSION)?;
+    write!(r.get_mut(), "{}\r\n", request_headers.to_http_string())?;
     r.get_mut().flush()?;
 
     let mut line = String::new();
@@ -38,7 +45,7 @@ pub fn request(url: &Url) -> color_eyre::Result<String> {
         .ok_or_eyre("Explanation expected in HTTP response")?;
     dbg!(version, status, explanation);
 
-    let mut response_headers = HashMap::new();
+    let mut response_headers = Headers::new();
     loop {
         line.clear();
         r.read_line(&mut line)?;
@@ -49,12 +56,12 @@ pub fn request(url: &Url) -> color_eyre::Result<String> {
             .trim()
             .split_once(':')
             .ok_or_eyre("Expected a colon in HTTP header line")?;
-        response_headers.insert(header.trim().to_ascii_lowercase(), value.trim().to_string());
+        response_headers.set(header.trim(), value.trim());
     }
     dbg!(&response_headers);
 
-    assert!(!response_headers.contains_key("transfer-encoding"));
-    assert!(!response_headers.contains_key("content-encoding"));
+    assert!(!response_headers.contains("transfer-encoding"));
+    assert!(!response_headers.contains("content-encoding"));
 
     let mut content = String::new();
     r.read_to_string(&mut content)?;
@@ -78,4 +85,50 @@ fn connect_https(url: &Url) -> color_eyre::Result<Box<dyn ReadWrite>> {
     )?;
     let sock = TcpStream::connect((url.host.as_str(), url.port))?;
     Ok(Box::new(rustls::StreamOwned::new(conn, sock)))
+}
+
+#[derive(Debug)]
+struct Headers {
+    values: HashMap<String, HeaderValue>,
+}
+
+#[derive(Debug)]
+struct HeaderValue {
+    original_name: String,
+    value: String,
+}
+
+impl Headers {
+    pub fn new() -> Self {
+        Self {
+            values: HashMap::new(),
+        }
+    }
+
+    pub fn add(mut self, name: &str, value: &str) -> Self {
+        self.set(name, value);
+        self
+    }
+
+    pub fn set(&mut self, name: &str, value: &str) {
+        self.values.insert(
+            name.to_ascii_lowercase(),
+            HeaderValue {
+                original_name: name.to_string(),
+                value: value.to_string(),
+            },
+        );
+    }
+
+    pub fn contains(&self, name: &str) -> bool {
+        self.values.contains_key(&name.to_ascii_lowercase())
+    }
+
+    pub fn to_http_string(&self) -> String {
+        let mut s = String::new();
+        for header in self.values.values() {
+            s.push_str(&format!("{}: {}\r\n", header.original_name, header.value));
+        }
+        s
+    }
 }
