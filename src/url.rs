@@ -2,15 +2,40 @@ use color_eyre::eyre::OptionExt;
 
 #[derive(Debug)]
 pub struct Url {
-    pub scheme: String,
+    pub scheme: Scheme,
+}
+
+#[derive(Debug)]
+pub enum Scheme {
+    Http(HttpUrl),
+    File(FileUrl),
+}
+
+#[derive(Debug)]
+pub struct HttpUrl {
+    pub tls: bool,
     pub host: String,
     pub port: u16,
+    pub path: String,
+}
+
+#[derive(Debug)]
+pub struct FileUrl {
     pub path: String,
 }
 
 impl Url {
     pub fn parse(url: &str) -> color_eyre::Result<Self> {
         let (scheme, url) = url.split_once("://").ok_or_eyre("URL must have a scheme")?;
+
+        if scheme == "file" {
+            return Ok(Url {
+                scheme: Scheme::File(FileUrl {
+                    path: url.to_string(),
+                }),
+            });
+        }
+
         let (mut host, url) = url.split_once('/').unwrap_or((url, ""));
         let path = format!("/{url}");
 
@@ -25,11 +50,13 @@ impl Url {
             }
         };
 
-        Ok(Self {
-            scheme: scheme.to_string(),
-            host: host.to_string(),
-            port,
-            path,
+        Ok(Url {
+            scheme: Scheme::Http(HttpUrl {
+                tls: scheme == "https",
+                host: host.to_string(),
+                port,
+                path,
+            }),
         })
     }
 }

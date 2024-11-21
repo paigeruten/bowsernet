@@ -1,5 +1,7 @@
 use bowsernet::{request, show, Url};
 
+const DEFAULT_URL: &str = "file://examples/welcome.html";
+
 fn load(url: &Url) -> color_eyre::Result<()> {
     let body = request(url)?;
     show(&body);
@@ -11,10 +13,7 @@ fn main() -> color_eyre::Result<()> {
 
     let args: Vec<String> = std::env::args().collect();
 
-    let url = Url::parse(
-        args.get(1)
-            .unwrap_or(&"https://example.org/index.html".to_string()),
-    )?;
+    let url = Url::parse(args.get(1).unwrap_or(&DEFAULT_URL.to_string()))?;
 
     load(&url)?;
 

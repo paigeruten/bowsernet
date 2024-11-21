@@ -2,31 +2,50 @@ use color_eyre::eyre::OptionExt;
 use rustls::{pki_types::ServerName, ClientConfig};
 use rustls_platform_verifier::ConfigVerifierExt;
 use std::{
-    collections::HashMap,
+    fs::File,
     io::{BufRead, BufReader, Read, Write},
     net::TcpStream,
     sync::Arc,
 };
 
-use crate::Url;
+use crate::{
+    http::headers::Headers,
+    url::{FileUrl, HttpUrl, Scheme},
+    Url,
+};
+
+mod headers;
 
 const HTTP_VERSION: &str = "1.1";
 const USER_AGENT: &str = "bowsernet 0.00001";
 
 pub fn request(url: &Url) -> color_eyre::Result<String> {
-    let stream = if url.scheme == "https" {
-        connect_https(url)?
+    let content = match &url.scheme {
+        Scheme::Http(http_url) => handle_normal_request(http_url)?,
+        Scheme::File(file_url) => handle_file_request(file_url)?,
+    };
+    Ok(content)
+}
+
+fn handle_normal_request(http_url: &HttpUrl) -> color_eyre::Result<String> {
+    let stream = if http_url.tls {
+        connect_https(http_url)?
     } else {
-        connect_http(url)?
+        connect_http(http_url)?
     };
     let mut r = BufReader::new(stream);
 
     let request_headers = Headers::new()
-        .add("Host", &url.host)
+        .add("Host", &http_url.host)
         .add("Connection", "close")
         .add("User-Agent", USER_AGENT);
 
-    write!(r.get_mut(), "GET {} HTTP/{}\r\n", url.path, HTTP_VERSION)?;
+    write!(
+        r.get_mut(),
+        "GET {} HTTP/{}\r\n",
+        http_url.path,
+        HTTP_VERSION
+    )?;
     write!(r.get_mut(), "{}\r\n", request_headers.to_http_string())?;
     r.get_mut().flush()?;
 
@@ -72,63 +91,24 @@ pub fn request(url: &Url) -> color_eyre::Result<String> {
 trait ReadWrite: Read + Write {}
 impl<T: Read + Write> ReadWrite for T {}
 
-fn connect_http(url: &Url) -> color_eyre::Result<Box<dyn ReadWrite>> {
-    let sock = TcpStream::connect((url.host.as_str(), url.port))?;
+fn connect_http(http_url: &HttpUrl) -> color_eyre::Result<Box<dyn ReadWrite>> {
+    let sock = TcpStream::connect((http_url.host.as_str(), http_url.port))?;
     Ok(Box::new(sock))
 }
 
-fn connect_https(url: &Url) -> color_eyre::Result<Box<dyn ReadWrite>> {
+fn connect_https(http_url: &HttpUrl) -> color_eyre::Result<Box<dyn ReadWrite>> {
     let config = ClientConfig::with_platform_verifier();
     let conn = rustls::ClientConnection::new(
         Arc::new(config),
-        ServerName::try_from(url.host.to_string())?,
+        ServerName::try_from(http_url.host.to_string())?,
     )?;
-    let sock = TcpStream::connect((url.host.as_str(), url.port))?;
+    let sock = TcpStream::connect((http_url.host.as_str(), http_url.port))?;
     Ok(Box::new(rustls::StreamOwned::new(conn, sock)))
 }
 
-#[derive(Debug)]
-struct Headers {
-    values: HashMap<String, HeaderValue>,
-}
-
-#[derive(Debug)]
-struct HeaderValue {
-    original_name: String,
-    value: String,
-}
-
-impl Headers {
-    pub fn new() -> Self {
-        Self {
-            values: HashMap::new(),
-        }
-    }
-
-    pub fn add(mut self, name: &str, value: &str) -> Self {
-        self.set(name, value);
-        self
-    }
-
-    pub fn set(&mut self, name: &str, value: &str) {
-        self.values.insert(
-            name.to_ascii_lowercase(),
-            HeaderValue {
-                original_name: name.to_string(),
-                value: value.to_string(),
-            },
-        );
-    }
-
-    pub fn contains(&self, name: &str) -> bool {
-        self.values.contains_key(&name.to_ascii_lowercase())
-    }
-
-    pub fn to_http_string(&self) -> String {
-        let mut s = String::new();
-        for header in self.values.values() {
-            s.push_str(&format!("{}: {}\r\n", header.original_name, header.value));
-        }
-        s
-    }
+fn handle_file_request(file_url: &FileUrl) -> color_eyre::Result<String> {
+    let mut f = File::open(&file_url.path)?;
+    let mut content = String::new();
+    f.read_to_string(&mut content)?;
+    Ok(content)
 }
