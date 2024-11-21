@@ -1,25 +1,30 @@
+use color_eyre::eyre::OptionExt;
+use rustls::{pki_types::ServerName, ClientConfig};
+use rustls_platform_verifier::ConfigVerifierExt;
 use std::{
     collections::HashMap,
-    io::{BufRead, BufReader, BufWriter, Read, Write},
+    io::{BufRead, BufReader, Read, Write},
     net::TcpStream,
+    sync::Arc,
 };
-
-use color_eyre::eyre::OptionExt;
 
 use crate::Url;
 
 pub fn request(url: &Url) -> color_eyre::Result<String> {
-    let stream = TcpStream::connect((url.host.as_str(), 80))?;
-    let mut reader = BufReader::new(&stream);
-    let mut writer = BufWriter::new(&stream);
+    let stream = if url.scheme == "https" {
+        connect_https(url)?
+    } else {
+        connect_http(url)?
+    };
+    let mut r = BufReader::new(stream);
 
-    write!(writer, "GET {} HTTP/1.0\r\n", url.path)?;
-    write!(writer, "Host: {}\r\n", url.host)?;
-    write!(writer, "\r\n")?;
-    writer.flush()?;
+    write!(r.get_mut(), "GET {} HTTP/1.0\r\n", url.path)?;
+    write!(r.get_mut(), "Host: {}\r\n", url.host)?;
+    write!(r.get_mut(), "\r\n")?;
+    r.get_mut().flush()?;
 
     let mut line = String::new();
-    reader.read_line(&mut line)?;
+    r.read_line(&mut line)?;
 
     let mut statusline = line.trim_ascii().splitn(3, ' ');
     let version = statusline
@@ -36,7 +41,7 @@ pub fn request(url: &Url) -> color_eyre::Result<String> {
     let mut response_headers = HashMap::new();
     loop {
         line.clear();
-        reader.read_line(&mut line)?;
+        r.read_line(&mut line)?;
         if line == "\r\n" {
             break;
         }
@@ -52,7 +57,25 @@ pub fn request(url: &Url) -> color_eyre::Result<String> {
     assert!(!response_headers.contains_key("content-encoding"));
 
     let mut content = String::new();
-    reader.read_to_string(&mut content)?;
+    r.read_to_string(&mut content)?;
 
     Ok(content)
+}
+
+trait ReadWrite: Read + Write {}
+impl<T: Read + Write> ReadWrite for T {}
+
+fn connect_http(url: &Url) -> color_eyre::Result<Box<dyn ReadWrite>> {
+    let sock = TcpStream::connect((url.host.as_str(), url.port))?;
+    Ok(Box::new(sock))
+}
+
+fn connect_https(url: &Url) -> color_eyre::Result<Box<dyn ReadWrite>> {
+    let config = ClientConfig::with_platform_verifier();
+    let conn = rustls::ClientConnection::new(
+        Arc::new(config),
+        ServerName::try_from(url.host.to_string())?,
+    )?;
+    let sock = TcpStream::connect((url.host.as_str(), url.port))?;
+    Ok(Box::new(rustls::StreamOwned::new(conn, sock)))
 }
