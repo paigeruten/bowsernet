@@ -3,6 +3,7 @@ use color_eyre::eyre::OptionExt;
 #[derive(Debug, PartialEq)]
 pub struct Url {
     pub scheme: Scheme,
+    pub view_source: bool,
 }
 
 #[derive(Debug, PartialEq)]
@@ -33,6 +34,9 @@ pub struct DataUrl {
 
 impl Url {
     pub fn parse(url: &str) -> color_eyre::Result<Self> {
+        let view_source = url.starts_with("view-source:");
+        let url = url.strip_prefix("view-source:").unwrap_or(url);
+
         if let Some(url) = url.strip_prefix("data:") {
             let (content_type, contents) = url
                 .split_once(',')
@@ -42,6 +46,7 @@ impl Url {
                     content_type: content_type.to_string(),
                     contents: contents.to_string(),
                 }),
+                view_source,
             });
         }
 
@@ -52,6 +57,7 @@ impl Url {
                 scheme: Scheme::File(FileUrl {
                     path: url.to_string(),
                 }),
+                view_source,
             });
         }
 
@@ -76,6 +82,7 @@ impl Url {
                 port,
                 path,
             }),
+            view_source,
         })
     }
 }
@@ -93,6 +100,7 @@ mod tests {
                 port: 80,
                 path: "/index.html".to_string(),
             }),
+            view_source: false,
         };
         assert_eq!(
             expected,
@@ -109,6 +117,7 @@ mod tests {
                 port: 80,
                 path: "/".to_string(),
             }),
+            view_source: false,
         };
         assert_eq!(expected, Url::parse("http://example.org").unwrap());
     }
@@ -122,10 +131,28 @@ mod tests {
                 port: 3000,
                 path: "/index.html".to_string(),
             }),
+            view_source: false,
         };
         assert_eq!(
             expected,
             Url::parse("http://example.org:3000/index.html").unwrap()
+        );
+    }
+
+    #[test]
+    fn url_parse_http_with_view_source() {
+        let expected = Url {
+            scheme: Scheme::Http(HttpUrl {
+                tls: false,
+                host: "example.org".to_string(),
+                port: 80,
+                path: "/index.html".to_string(),
+            }),
+            view_source: true,
+        };
+        assert_eq!(
+            expected,
+            Url::parse("view-source:http://example.org/index.html").unwrap()
         );
     }
 
@@ -138,6 +165,7 @@ mod tests {
                 port: 443,
                 path: "/index.html".to_string(),
             }),
+            view_source: false,
         };
         assert_eq!(
             expected,
@@ -151,6 +179,7 @@ mod tests {
             scheme: Scheme::File(FileUrl {
                 path: "/etc/test.html".to_string(),
             }),
+            view_source: false,
         };
         assert_eq!(expected, Url::parse("file:///etc/test.html").unwrap());
     }
@@ -162,6 +191,7 @@ mod tests {
                 content_type: "text/html".to_string(),
                 contents: "Hello world!".to_string(),
             }),
+            view_source: false,
         };
         assert_eq!(expected, Url::parse("data:text/html,Hello world!").unwrap());
     }

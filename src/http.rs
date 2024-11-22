@@ -25,7 +25,14 @@ pub fn request(url: &Url) -> color_eyre::Result<String> {
         Scheme::File(file_url) => handle_file_request(file_url)?,
         Scheme::Data(data_url) => handle_data_request(data_url)?,
     };
-    Ok(content)
+    if url.view_source {
+        Ok(content
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;"))
+    } else {
+        Ok(content)
+    }
 }
 
 fn handle_normal_request(http_url: &HttpUrl) -> color_eyre::Result<String> {
