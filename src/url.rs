@@ -1,17 +1,18 @@
 use color_eyre::eyre::OptionExt;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Url {
     pub scheme: Scheme,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Scheme {
     Http(HttpUrl),
     File(FileUrl),
+    Data(DataUrl),
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct HttpUrl {
     pub tls: bool,
     pub host: String,
@@ -19,13 +20,31 @@ pub struct HttpUrl {
     pub path: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct FileUrl {
     pub path: String,
 }
 
+#[derive(Debug, PartialEq)]
+pub struct DataUrl {
+    pub content_type: String,
+    pub contents: String,
+}
+
 impl Url {
     pub fn parse(url: &str) -> color_eyre::Result<Self> {
+        if let Some(url) = url.strip_prefix("data:") {
+            let (content_type, contents) = url
+                .split_once(',')
+                .ok_or_eyre("Data URLs must have a content type")?;
+            return Ok(Url {
+                scheme: Scheme::Data(DataUrl {
+                    content_type: content_type.to_string(),
+                    contents: contents.to_string(),
+                }),
+            });
+        }
+
         let (scheme, url) = url.split_once("://").ok_or_eyre("URL must have a scheme")?;
 
         if scheme == "file" {
@@ -58,5 +77,92 @@ impl Url {
                 path,
             }),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn url_parse_http() {
+        let expected = Url {
+            scheme: Scheme::Http(HttpUrl {
+                tls: false,
+                host: "example.org".to_string(),
+                port: 80,
+                path: "/index.html".to_string(),
+            }),
+        };
+        assert_eq!(
+            expected,
+            Url::parse("http://example.org/index.html").unwrap()
+        );
+    }
+
+    #[test]
+    fn url_parse_http_with_no_path() {
+        let expected = Url {
+            scheme: Scheme::Http(HttpUrl {
+                tls: false,
+                host: "example.org".to_string(),
+                port: 80,
+                path: "/".to_string(),
+            }),
+        };
+        assert_eq!(expected, Url::parse("http://example.org").unwrap());
+    }
+
+    #[test]
+    fn url_parse_http_with_explicit_port() {
+        let expected = Url {
+            scheme: Scheme::Http(HttpUrl {
+                tls: false,
+                host: "example.org".to_string(),
+                port: 3000,
+                path: "/index.html".to_string(),
+            }),
+        };
+        assert_eq!(
+            expected,
+            Url::parse("http://example.org:3000/index.html").unwrap()
+        );
+    }
+
+    #[test]
+    fn url_parse_https() {
+        let expected = Url {
+            scheme: Scheme::Http(HttpUrl {
+                tls: true,
+                host: "example.org".to_string(),
+                port: 443,
+                path: "/index.html".to_string(),
+            }),
+        };
+        assert_eq!(
+            expected,
+            Url::parse("https://example.org/index.html").unwrap()
+        );
+    }
+
+    #[test]
+    fn url_parse_file() {
+        let expected = Url {
+            scheme: Scheme::File(FileUrl {
+                path: "/etc/test.html".to_string(),
+            }),
+        };
+        assert_eq!(expected, Url::parse("file:///etc/test.html").unwrap());
+    }
+
+    #[test]
+    fn url_parse_data() {
+        let expected = Url {
+            scheme: Scheme::Data(DataUrl {
+                content_type: "text/html".to_string(),
+                contents: "Hello world!".to_string(),
+            }),
+        };
+        assert_eq!(expected, Url::parse("data:text/html,Hello world!").unwrap());
     }
 }

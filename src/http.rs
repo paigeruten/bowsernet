@@ -10,7 +10,7 @@ use std::{
 
 use crate::{
     http::headers::Headers,
-    url::{FileUrl, HttpUrl, Scheme},
+    url::{DataUrl, FileUrl, HttpUrl, Scheme},
     Url,
 };
 
@@ -23,6 +23,7 @@ pub fn request(url: &Url) -> color_eyre::Result<String> {
     let content = match &url.scheme {
         Scheme::Http(http_url) => handle_normal_request(http_url)?,
         Scheme::File(file_url) => handle_file_request(file_url)?,
+        Scheme::Data(data_url) => handle_data_request(data_url)?,
     };
     Ok(content)
 }
@@ -111,4 +112,8 @@ fn handle_file_request(file_url: &FileUrl) -> color_eyre::Result<String> {
     let mut content = String::new();
     f.read_to_string(&mut content)?;
     Ok(content)
+}
+
+fn handle_data_request(data_url: &DataUrl) -> color_eyre::Result<String> {
+    Ok(data_url.contents.clone())
 }
