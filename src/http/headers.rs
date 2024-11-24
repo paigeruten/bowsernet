@@ -23,7 +23,6 @@ impl Headers {
         self
     }
 
-    #[cfg(test)]
     pub fn get(&self, name: &str) -> Option<&str> {
         self.values
             .get(&name.to_ascii_lowercase())
