@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use color_eyre::eyre::OptionExt;
 
 #[derive(Debug, PartialEq)]
@@ -84,6 +86,44 @@ impl Url {
             }),
             view_source,
         })
+    }
+}
+
+impl Display for Url {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        if self.view_source {
+            write!(f, "view-source:")?;
+        }
+        match &self.scheme {
+            Scheme::Http(http_url) => write!(f, "{}", http_url),
+            Scheme::File(file_url) => write!(f, "{}", file_url),
+            Scheme::Data(data_url) => write!(f, "{}", data_url),
+        }
+    }
+}
+
+impl Display for HttpUrl {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(
+            f,
+            "http{}://{}:{}{}",
+            if self.tls { "s" } else { "" },
+            self.host,
+            self.port,
+            self.path
+        )
+    }
+}
+
+impl Display for FileUrl {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "file://{}", self.path)
+    }
+}
+
+impl Display for DataUrl {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "data:{},{}", self.content_type, self.contents)
     }
 }
 
@@ -194,5 +234,73 @@ mod tests {
             view_source: false,
         };
         assert_eq!(expected, Url::parse("data:text/html,Hello world!").unwrap());
+    }
+
+    #[test]
+    fn display_http_url() {
+        let url = Url {
+            scheme: Scheme::Http(HttpUrl {
+                tls: false,
+                host: "example.org".to_string(),
+                port: 80,
+                path: "/index.html".to_string(),
+            }),
+            view_source: false,
+        };
+        assert_eq!(format!("{}", url), "http://example.org:80/index.html");
+    }
+
+    #[test]
+    fn display_https_url() {
+        let url = Url {
+            scheme: Scheme::Http(HttpUrl {
+                tls: true,
+                host: "example.org".to_string(),
+                port: 80,
+                path: "/index.html".to_string(),
+            }),
+            view_source: false,
+        };
+        assert_eq!(format!("{}", url), "https://example.org:80/index.html");
+    }
+
+    #[test]
+    fn display_view_source_url() {
+        let url = Url {
+            scheme: Scheme::Http(HttpUrl {
+                tls: false,
+                host: "example.org".to_string(),
+                port: 80,
+                path: "/index.html".to_string(),
+            }),
+            view_source: true,
+        };
+        assert_eq!(
+            format!("{}", url),
+            "view-source:http://example.org:80/index.html"
+        );
+    }
+
+    #[test]
+    fn display_file_url() {
+        let url = Url {
+            scheme: Scheme::File(FileUrl {
+                path: "/etc/passwd".to_string(),
+            }),
+            view_source: false,
+        };
+        assert_eq!(format!("{}", url), "file:///etc/passwd");
+    }
+
+    #[test]
+    fn display_data_url() {
+        let url = Url {
+            scheme: Scheme::Data(DataUrl {
+                content_type: "text/html".to_string(),
+                contents: "<b>Hello world!</b>".to_string(),
+            }),
+            view_source: false,
+        };
+        assert_eq!(format!("{}", url), "data:text/html,<b>Hello world!</b>");
     }
 }

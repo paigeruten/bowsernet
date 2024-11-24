@@ -20,6 +20,7 @@ const USER_AGENT: &str = "bowsernet 0.00001";
 const REDIRECT_LIMIT: usize = 5;
 
 pub fn request(url: &Url, connection_pool: &mut ConnectionPool) -> color_eyre::Result<String> {
+    tracing::info!("Requesting {}", url);
     let content = match &url.scheme {
         Scheme::Http(http_url) => handle_normal_request(http_url, connection_pool, 0)?,
         Scheme::File(file_url) => handle_file_request(file_url)?,
@@ -35,6 +36,7 @@ pub fn request(url: &Url, connection_pool: &mut ConnectionPool) -> color_eyre::R
     }
 }
 
+#[tracing::instrument(skip(http_url, connection_pool), fields(http_url = %http_url))]
 fn handle_normal_request(
     http_url: &HttpUrl,
     connection_pool: &mut ConnectionPool,
@@ -63,7 +65,7 @@ fn handle_normal_request(
     stream.read_line(&mut line)?;
 
     let mut statusline = line.trim_ascii().splitn(3, ' ');
-    let version = statusline
+    let _version = statusline
         .next()
         .ok_or_eyre("Version expected in HTTP response")?;
     let status: u16 = statusline
@@ -74,7 +76,7 @@ fn handle_normal_request(
     let explanation = statusline
         .next()
         .ok_or_eyre("Explanation expected in HTTP response")?;
-    dbg!(version, status, explanation);
+    tracing::info!("Server returned {} {}", status, explanation);
 
     let mut response_headers = Headers::new();
     loop {
@@ -89,7 +91,7 @@ fn handle_normal_request(
             .ok_or_eyre("Expected a colon in HTTP header line")?;
         response_headers.set(header.trim(), value.trim());
     }
-    dbg!(&response_headers);
+    tracing::debug!("Response headers: {:?}", &response_headers);
 
     assert!(!response_headers.contains("transfer-encoding"));
     assert!(!response_headers.contains("content-encoding"));
@@ -101,7 +103,7 @@ fn handle_normal_request(
 
     if (300..=399).contains(&status) {
         let location = response_headers.get("location").unwrap();
-        println!("Redirecting to {}", location);
+        tracing::info!("Redirecting to {}", location);
         let redirect_url = if location.starts_with('/') {
             HttpUrl {
                 path: location.to_string(),

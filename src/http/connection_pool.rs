@@ -38,12 +38,18 @@ impl ConnectionPool {
             port: http_url.port,
             tls: http_url.tls,
         };
-        println!("Checking for existing connection for {:?}...", &key);
+        let num_connections = self.connections.len();
         Ok(&mut self
             .connections
             .entry(key)
             .or_insert_with(|| {
-                println!("No existing connection found, creating a new one.");
+                tracing::info!(
+                    "Connecting to http{}://{}:{} (total connections: {})",
+                    if http_url.tls { "s" } else { "" },
+                    http_url.host,
+                    http_url.port,
+                    num_connections + 1
+                );
                 Stream(BufReader::new(match http_url.tls {
                     false => connect_http(http_url).unwrap(),
                     true => connect_https(http_url).unwrap(),
