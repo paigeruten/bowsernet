@@ -52,6 +52,29 @@ impl Headers {
     }
 }
 
+#[derive(Debug, Default)]
+pub struct CacheControl {
+    pub no_store: bool,
+    pub max_age: Option<u64>,
+}
+
+impl From<&str> for CacheControl {
+    fn from(value: &str) -> Self {
+        let mut no_store = false;
+        let mut max_age = None;
+        for directive in value.split(',') {
+            let directive = directive.trim_ascii().to_lowercase();
+            if directive == "no-store" {
+                no_store = true;
+            } else if let Some(max_age_value) = directive.strip_prefix("max-age=") {
+                max_age = max_age_value.parse().ok().filter(|&max_age| max_age != 0);
+            }
+        }
+
+        CacheControl { no_store, max_age }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

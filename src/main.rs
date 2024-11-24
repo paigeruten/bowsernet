@@ -1,12 +1,13 @@
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
-use bowsernet::{request, show, ConnectionPool, Url};
+use bowsernet::{request, show, ConnectionPool, RequestCache, Url};
 
 const DEFAULT_URL: &str = "file://examples/welcome.html";
 
 fn load(url: &Url) -> color_eyre::Result<()> {
     let mut connection_pool = ConnectionPool::new();
-    let body = request(url, &mut connection_pool)?;
+    let mut request_cache = RequestCache::new();
+    let body = request(url, &mut connection_pool, &mut request_cache)?;
     show(&body);
     Ok(())
 }

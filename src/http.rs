@@ -5,7 +5,8 @@ use std::{
 };
 
 use crate::{
-    http::headers::Headers,
+    cache::RequestCache,
+    http::headers::{CacheControl, Headers},
     url::{DataUrl, FileUrl, HttpUrl, Scheme},
     Url,
 };
@@ -19,10 +20,14 @@ const HTTP_VERSION: &str = "1.1";
 const USER_AGENT: &str = "bowsernet 0.00001";
 const REDIRECT_LIMIT: usize = 5;
 
-pub fn request(url: &Url, connection_pool: &mut ConnectionPool) -> color_eyre::Result<String> {
+pub fn request(
+    url: &Url,
+    connection_pool: &mut ConnectionPool,
+    cache: &mut RequestCache,
+) -> color_eyre::Result<String> {
     tracing::info!("Requesting {}", url);
     let content = match &url.scheme {
-        Scheme::Http(http_url) => handle_normal_request(http_url, connection_pool, 0)?,
+        Scheme::Http(http_url) => handle_normal_request(http_url, connection_pool, cache, 0)?,
         Scheme::File(file_url) => handle_file_request(file_url)?,
         Scheme::Data(data_url) => handle_data_request(data_url)?,
     };
@@ -36,14 +41,20 @@ pub fn request(url: &Url, connection_pool: &mut ConnectionPool) -> color_eyre::R
     }
 }
 
-#[tracing::instrument(skip(http_url, connection_pool), fields(http_url = %http_url))]
+#[tracing::instrument(skip(http_url, connection_pool, cache), fields(http_url = %http_url))]
 fn handle_normal_request(
     http_url: &HttpUrl,
     connection_pool: &mut ConnectionPool,
+    cache: &mut RequestCache,
     num_redirects: usize,
 ) -> color_eyre::Result<String> {
     if num_redirects >= REDIRECT_LIMIT {
         return Err(color_eyre::eyre::eyre!("Too many redirects"));
+    }
+
+    if let Some(content) = cache.get(http_url) {
+        tracing::info!("Loading response from cache");
+        return Ok(content.to_string());
     }
 
     let stream = connection_pool.get_connection(http_url)?;
@@ -100,6 +111,7 @@ fn handle_normal_request(
 
     let mut content = vec![0; content_length];
     stream.read_exact(&mut content)?;
+    let content = String::from_utf8(content)?;
 
     if (300..=399).contains(&status) {
         let location = response_headers.get("location").unwrap();
@@ -114,10 +126,27 @@ fn handle_normal_request(
         } else {
             return Err(color_eyre::eyre::eyre!("Invalid redirect URL"));
         };
-        return handle_normal_request(&redirect_url, connection_pool, num_redirects + 1);
+        return handle_normal_request(&redirect_url, connection_pool, cache, num_redirects + 1);
     }
 
-    Ok(String::from_utf8(content)?)
+    if status == 200 {
+        let cache_control: CacheControl = response_headers
+            .get("cache-control")
+            .map(|value| value.into())
+            .unwrap_or_default();
+
+        if cache_control.no_store {
+            tracing::info!("Not caching request due to no-store directive");
+        } else {
+            tracing::info!(
+                "Caching request with max_age of {:?}",
+                cache_control.max_age
+            );
+            cache.set(http_url, &content, cache_control.max_age);
+        }
+    }
+
+    Ok(content)
 }
 
 fn handle_file_request(file_url: &FileUrl) -> color_eyre::Result<String> {
