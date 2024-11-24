@@ -13,7 +13,7 @@ pub enum Scheme {
     Data(DataUrl),
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct HttpUrl {
     pub tls: bool,
     pub host: String,

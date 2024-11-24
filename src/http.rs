@@ -17,10 +17,11 @@ pub use connection_pool::ConnectionPool;
 
 const HTTP_VERSION: &str = "1.1";
 const USER_AGENT: &str = "bowsernet 0.00001";
+const REDIRECT_LIMIT: usize = 5;
 
 pub fn request(url: &Url, connection_pool: &mut ConnectionPool) -> color_eyre::Result<String> {
     let content = match &url.scheme {
-        Scheme::Http(http_url) => handle_normal_request(http_url, connection_pool)?,
+        Scheme::Http(http_url) => handle_normal_request(http_url, connection_pool, 0)?,
         Scheme::File(file_url) => handle_file_request(file_url)?,
         Scheme::Data(data_url) => handle_data_request(data_url)?,
     };
@@ -37,7 +38,12 @@ pub fn request(url: &Url, connection_pool: &mut ConnectionPool) -> color_eyre::R
 fn handle_normal_request(
     http_url: &HttpUrl,
     connection_pool: &mut ConnectionPool,
+    num_redirects: usize,
 ) -> color_eyre::Result<String> {
+    if num_redirects >= REDIRECT_LIMIT {
+        return Err(color_eyre::eyre::eyre!("Too many redirects"));
+    }
+
     let stream = connection_pool.get_connection(http_url)?;
 
     let request_headers = Headers::new()
@@ -60,9 +66,11 @@ fn handle_normal_request(
     let version = statusline
         .next()
         .ok_or_eyre("Version expected in HTTP response")?;
-    let status = statusline
+    let status: u16 = statusline
         .next()
-        .ok_or_eyre("Status expected in HTTP response")?;
+        .ok_or_eyre("Status expected in HTTP response")?
+        .parse()
+        .unwrap();
     let explanation = statusline
         .next()
         .ok_or_eyre("Explanation expected in HTTP response")?;
@@ -90,6 +98,22 @@ fn handle_normal_request(
 
     let mut content = vec![0; content_length];
     stream.read_exact(&mut content)?;
+
+    if (300..=399).contains(&status) {
+        let location = response_headers.get("location").unwrap();
+        println!("Redirecting to {}", location);
+        let redirect_url = if location.starts_with('/') {
+            HttpUrl {
+                path: location.to_string(),
+                ..http_url.clone()
+            }
+        } else if let Scheme::Http(redirect_url) = Url::parse(location)?.scheme {
+            redirect_url
+        } else {
+            return Err(color_eyre::eyre::eyre!("Invalid redirect URL"));
+        };
+        return handle_normal_request(&redirect_url, connection_pool, num_redirects + 1);
+    }
 
     Ok(String::from_utf8(content)?)
 }
