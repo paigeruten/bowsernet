@@ -1,4 +1,5 @@
 use color_eyre::eyre::OptionExt;
+use flate2::bufread::GzDecoder;
 use std::{
     fs::File,
     io::{BufRead, Read, Write},
@@ -61,6 +62,7 @@ fn handle_normal_request(
 
     let request_headers = Headers::new()
         .add("Host", &http_url.host)
+        .add("Accept-Encoding", "gzip")
         .add("User-Agent", USER_AGENT);
 
     write!(
@@ -104,14 +106,57 @@ fn handle_normal_request(
     }
     tracing::debug!("Response headers: {:?}", &response_headers);
 
-    assert!(!response_headers.contains("transfer-encoding"));
-    assert!(!response_headers.contains("content-encoding"));
+    let content = if let Some(transfer_encoding) = response_headers.get("transfer-encoding") {
+        if transfer_encoding != "chunked" {
+            return Err(color_eyre::eyre::eyre!(
+                "Unhandled transfer-encoding: {transfer_encoding}"
+            ));
+        }
 
-    let content_length: usize = response_headers.get("content-length").unwrap().parse()?;
+        tracing::info!("Reading chunked response");
 
-    let mut content = vec![0; content_length];
-    stream.read_exact(&mut content)?;
-    let content = String::from_utf8(content)?;
+        let mut expected_newline = vec![0; 2];
+        let mut content = Vec::new();
+        let mut line = String::new();
+        let mut chunk = Vec::new();
+        loop {
+            line.clear();
+            stream.read_line(&mut line)?;
+            let chunk_length = usize::from_str_radix(line.trim_ascii_end(), 16)?;
+
+            tracing::debug!("Reading chunk of length {chunk_length}");
+
+            chunk.clear();
+            chunk.resize(chunk_length, 0);
+            stream.read_exact(&mut chunk)?;
+            content.append(&mut chunk);
+
+            expected_newline.fill(0);
+            stream.read_exact(&mut expected_newline)?;
+            assert_eq!(expected_newline, b"\r\n");
+
+            if chunk_length == 0 {
+                break;
+            }
+        }
+
+        content
+    } else {
+        let content_length: usize = response_headers.get("content-length").unwrap().parse()?;
+        let mut content = vec![0; content_length];
+        stream.read_exact(&mut content)?;
+        content
+    };
+
+    let content = if response_headers.contains("content-encoding") {
+        tracing::info!("Decompressing gzipped response");
+        let mut gz = GzDecoder::new(&content[..]);
+        let mut decompressed = String::new();
+        gz.read_to_string(&mut decompressed)?;
+        decompressed
+    } else {
+        String::from_utf8(content)?
+    };
 
     if (300..=399).contains(&status) {
         let location = response_headers.get("location").unwrap();
