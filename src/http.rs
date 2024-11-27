@@ -204,3 +204,114 @@ fn handle_file_request(file_url: &FileUrl) -> color_eyre::Result<String> {
 fn handle_data_request(data_url: &DataUrl) -> color_eyre::Result<String> {
     Ok(data_url.contents.clone())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::http::connection_pool::fake::FakeStream;
+
+    fn mocked_request(url: &Url, raw_response: &[u8]) -> color_eyre::Result<String> {
+        let http_url = match &url.scheme {
+            Scheme::Http(http_url) => http_url,
+            _ => return Err(color_eyre::eyre::eyre!("Mock URL's scheme must be HTTP(S)")),
+        };
+
+        let mut connection_pool = ConnectionPool::new();
+        connection_pool.set_connection(http_url, Box::new(FakeStream::new(raw_response)));
+
+        request(url, &mut connection_pool, &mut RequestCache::new())
+    }
+
+    #[test]
+    fn basic_request() -> color_eyre::Result<()> {
+        let url = Url::parse("http://example.org")?;
+        let raw_response = b"\
+            HTTP/1.1 200 OK\r\n\
+            Content-Length: 13\r\n\
+            \r\n\
+            Hello, world!";
+
+        let response = mocked_request(&url, raw_response)?;
+
+        assert_eq!(response, "Hello, world!");
+
+        Ok(())
+    }
+
+    #[test]
+    fn request_with_view_source() -> color_eyre::Result<()> {
+        let url = Url::parse("view-source:http://example.org")?;
+        let raw_response = b"\
+            HTTP/1.1 200 OK\r\n\
+            Content-Length: 20\r\n\
+            \r\n\
+            <p>Hello, world!</p>";
+
+        let response = mocked_request(&url, raw_response)?;
+
+        assert_eq!(response, "&lt;p&gt;Hello, world!&lt;/p&gt;");
+
+        Ok(())
+    }
+
+    #[test]
+    fn request_with_redirect() -> color_eyre::Result<()> {
+        let url = Url::parse("http://example.org")?;
+        let raw_response = b"\
+            HTTP/1.1 301 Moved Permanently\r\n\
+            Location: /index.html\r\n\
+            Content-Length: 0\r\n\
+            \r\n\
+            HTTP/1.1 200 OK\r\n\
+            Content-Length: 13\r\n\
+            \r\n\
+            Hello, world!";
+
+        let response = mocked_request(&url, raw_response)?;
+
+        assert_eq!(response, "Hello, world!");
+
+        Ok(())
+    }
+
+    #[test]
+    fn request_chunked_encoding() -> color_eyre::Result<()> {
+        let url = Url::parse("http://example.org")?;
+        let raw_response = b"\
+            HTTP/1.1 200 OK\r\n\
+            Transfer-Encoding: chunked\r\n\
+            \r\n\
+            7\r\n\
+            Hello, \r\n\
+            6\r\n\
+            world!\r\n\
+            0\r\n\
+            \r\n";
+
+        let response = mocked_request(&url, raw_response)?;
+
+        assert_eq!(response, "Hello, world!");
+
+        Ok(())
+    }
+
+    #[test]
+    fn request_gzipped() -> color_eyre::Result<()> {
+        let url = Url::parse("http://example.org")?;
+        let raw_response = b"\
+            HTTP/1.1 200 OK\r\n\
+            Content-Encoding: gzip\r\n\
+            Transfer-Encoding: chunked\r\n\
+            \r\n\
+            21\r\n\
+            \x1F\x8B\x08\x00\x00\x00\x00\x00\x00\x03\xF3\x48\xCD\xC9\xC9\xD7\x51\x28\xCF\x2F\xCA\x49\x51\x04\x00\xE6\xC6\xE6\xEB\x0D\x00\x00\x00\r\n\
+            0\r\n\
+            \r\n";
+
+        let response = mocked_request(&url, raw_response)?;
+
+        assert_eq!(response, "Hello, world!");
+
+        Ok(())
+    }
+}
