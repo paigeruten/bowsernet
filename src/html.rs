@@ -1,7 +1,8 @@
-pub fn show(body: &str) {
+pub fn lex(body: &str) -> String {
     let mut in_tag = false;
     let mut in_entity = false;
     let mut entity = String::new();
+    let mut text = String::new();
     for c in body.chars() {
         if c == '<' {
             in_tag = true;
@@ -14,21 +15,25 @@ pub fn show(body: &str) {
                 entity.push(c);
             } else if c == ';' {
                 if let Some(translated) = translate_entity(&entity) {
-                    print!("{}", translated);
+                    text.push_str(translated);
                 } else {
-                    print!("&{};", entity);
+                    text.push('&');
+                    text.push_str(&entity);
+                    text.push(';');
                 }
                 in_entity = false;
                 entity.clear();
             } else {
-                print!("&{}", entity);
+                text.push('&');
+                text.push_str(&entity);
                 in_entity = false;
                 entity.clear();
             }
         } else if !in_tag {
-            print!("{}", c);
+            text.push(c);
         }
     }
+    text
 }
 
 fn translate_entity(entity: &str) -> Option<&str> {
