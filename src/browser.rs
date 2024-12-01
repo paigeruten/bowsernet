@@ -74,6 +74,11 @@ fn layout(text: &str) -> Vec<DisplayItem> {
     let mut cursor_x = HSTEP;
     let mut cursor_y = VSTEP;
     for c in text.chars() {
+        if c == '\n' {
+            cursor_x = HSTEP;
+            cursor_y += VSTEP + (VSTEP / 2);
+            continue;
+        }
         display_list.push(DisplayItem {
             x: cursor_x,
             y: cursor_y,
