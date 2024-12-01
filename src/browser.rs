@@ -1,4 +1,7 @@
-use crate::{config::Dimensions, lex, request, ConnectionPool, RequestCache, Url};
+use crate::{
+    config::{Dimensions, SCROLL_BAR_WIDTH},
+    lex, request, ConnectionPool, RequestCache, Url,
+};
 use macroquad::prelude::*;
 
 const HSTEP: i32 = 15;
@@ -13,6 +16,7 @@ pub struct Browser {
     display_list: Vec<DisplayItem>,
     dimensions: Dimensions,
     scroll: i32,
+    scroll_max: i32,
 }
 
 impl Browser {
@@ -28,14 +32,30 @@ impl Browser {
                 height: screen_height() as i32,
             },
             scroll: 0,
+            scroll_max: 0,
         })
     }
 
     pub fn load(&mut self, url: &Url) -> color_eyre::Result<()> {
         let body = request(url, &mut self.connection_pool, &mut self.request_cache)?;
         self.display_text = lex(&body);
-        self.display_list = layout(&self.display_text, self.dimensions.width);
+        self.reflow();
         Ok(())
+    }
+
+    fn reflow(&mut self) {
+        self.display_list = layout(&self.display_text, self.dimensions.width);
+        self.scroll_max = self
+            .display_list
+            .iter()
+            .filter(|disp| !disp.c.is_whitespace())
+            .map(|disp| disp.y)
+            .max()
+            .unwrap_or(0);
+        self.scroll_max = (self.scroll_max - self.dimensions.height + VSTEP).max(0);
+        if self.scroll > self.scroll_max {
+            self.scroll = self.scroll_max;
+        }
     }
 
     pub fn draw(&self) {
@@ -56,6 +76,19 @@ impl Browser {
                 },
             );
         }
+
+        if self.scroll_max > 0 {
+            let scroll_screens = 1. + self.scroll_max as f32 / self.dimensions.height as f32;
+            let scroll_bar_height = (self.dimensions.height as f32 / scroll_screens).max(10.);
+            draw_rectangle(
+                self.dimensions.width as f32 - SCROLL_BAR_WIDTH,
+                self.scroll as f32 / self.scroll_max as f32
+                    * (self.dimensions.height as f32 - scroll_bar_height),
+                SCROLL_BAR_WIDTH,
+                scroll_bar_height,
+                Color { a: 0.6, ..BLUE },
+            );
+        }
     }
 
     pub fn handle_input(&mut self) {
@@ -74,17 +107,19 @@ impl Browser {
 
         if self.scroll < 0 {
             self.scroll = 0;
+        } else if self.scroll > self.scroll_max {
+            self.scroll = self.scroll_max;
         }
     }
 
-    pub fn handle_resize(&mut self) {
+    fn handle_resize(&mut self) {
         let new_dimensions = Dimensions {
             width: screen_width() as i32,
             height: screen_height() as i32,
         };
         if new_dimensions != self.dimensions {
             self.dimensions = new_dimensions;
-            self.display_list = layout(&self.display_text, self.dimensions.width);
+            self.reflow();
         }
     }
 }

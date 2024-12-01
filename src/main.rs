@@ -2,7 +2,10 @@ use macroquad::prelude::*;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 use bowsernet::{
-    config::{DEFAULT_HEIGHT, DEFAULT_URL, DEFAULT_WIDTH},
+    config::{
+        DEFAULT_HEIGHT, DEFAULT_URL, DEFAULT_WIDTH, FPS_FONT_SIZE, FPS_HEIGHT, FPS_HPADDING,
+        FPS_VPADDING, FPS_WIDTH,
+    },
     Browser, Url,
 };
 
@@ -40,13 +43,19 @@ async fn main() -> color_eyre::Result<()> {
             fps = format!("FPS: {}", get_fps());
         }
         draw_rectangle(
-            screen_width() - 68.,
+            screen_width() - FPS_WIDTH,
             0.,
-            68.,
-            16.,
+            FPS_WIDTH,
+            FPS_HEIGHT,
             Color { a: 0.6, ..BLACK },
         );
-        draw_text(&fps, screen_width() - 66., 12., 18., WHITE);
+        draw_text(
+            &fps,
+            screen_width() - FPS_WIDTH + FPS_HPADDING,
+            FPS_VPADDING,
+            FPS_FONT_SIZE,
+            WHITE,
+        );
 
         next_frame().await;
         frame += 1;
