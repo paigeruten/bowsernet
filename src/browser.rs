@@ -55,10 +55,19 @@ impl Browser {
     }
 
     pub fn handle_input(&mut self) {
+        let (_, mouse_wheel_y) = mouse_wheel();
+        self.scroll -= mouse_wheel_y as i32;
+
         if is_key_pressed(KeyCode::Space) {
             self.scroll += SCROLL_STEP;
         } else if is_key_down(KeyCode::Down) {
             self.scroll += 2;
+        } else if is_key_down(KeyCode::Up) {
+            self.scroll -= 2;
+        }
+
+        if self.scroll < 0 {
+            self.scroll = 0;
         }
     }
 }
