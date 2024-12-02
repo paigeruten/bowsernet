@@ -7,6 +7,7 @@ edition = "2021"
 color-eyre = { version = "0.6", default-features = false }
 flate2 = "1.0.35"
 macroquad = "0.4.13"
+resvg = "0.44.0"
 rustls = "0.23.17"
 rustls-platform-verifier = "0.4.0"
 tracing = "0.1.40"
