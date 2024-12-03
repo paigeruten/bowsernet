@@ -8,7 +8,7 @@ use std::{
 use crate::{
     cache::RequestCache,
     http::headers::{CacheControl, Headers},
-    url::{DataUrl, FileUrl, HttpUrl, Scheme},
+    url::{BuiltinUrl, DataUrl, FileUrl, HttpUrl, Scheme},
     Url,
 };
 
@@ -31,6 +31,7 @@ pub fn request(
         Scheme::Http(http_url) => handle_normal_request(http_url, connection_pool, cache, 0)?,
         Scheme::File(file_url) => handle_file_request(file_url)?,
         Scheme::Data(data_url) => handle_data_request(data_url)?,
+        Scheme::Builtin(builtin_url) => handle_builtin_request(builtin_url)?,
     };
     if url.view_source {
         Ok(content
@@ -203,6 +204,12 @@ fn handle_file_request(file_url: &FileUrl) -> color_eyre::Result<String> {
 
 fn handle_data_request(data_url: &DataUrl) -> color_eyre::Result<String> {
     Ok(data_url.contents.clone())
+}
+
+fn handle_builtin_request(builtin_url: &BuiltinUrl) -> color_eyre::Result<String> {
+    match builtin_url {
+        BuiltinUrl::AboutBlank => Ok("".to_string()),
+    }
 }
 
 #[cfg(test)]

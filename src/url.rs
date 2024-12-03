@@ -13,6 +13,7 @@ pub enum Scheme {
     Http(HttpUrl),
     File(FileUrl),
     Data(DataUrl),
+    Builtin(BuiltinUrl),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -34,8 +35,20 @@ pub struct DataUrl {
     pub contents: String,
 }
 
+#[derive(Debug, PartialEq)]
+pub enum BuiltinUrl {
+    AboutBlank,
+}
+
 impl Url {
     pub fn parse(url: &str) -> color_eyre::Result<Self> {
+        if let Some(builtin_url) = parse_builtin(url) {
+            return Ok(Url {
+                scheme: Scheme::Builtin(builtin_url),
+                view_source: false,
+            });
+        }
+
         let view_source = url.starts_with("view-source:");
         let url = url.strip_prefix("view-source:").unwrap_or(url);
 
@@ -98,6 +111,7 @@ impl Display for Url {
             Scheme::Http(http_url) => write!(f, "{}", http_url),
             Scheme::File(file_url) => write!(f, "{}", file_url),
             Scheme::Data(data_url) => write!(f, "{}", data_url),
+            Scheme::Builtin(builtin_url) => write!(f, "{}", builtin_url),
         }
     }
 }
@@ -124,6 +138,21 @@ impl Display for FileUrl {
 impl Display for DataUrl {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "data:{},{}", self.content_type, self.contents)
+    }
+}
+
+impl Display for BuiltinUrl {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            BuiltinUrl::AboutBlank => write!(f, "about:blank"),
+        }
+    }
+}
+
+fn parse_builtin(url: &str) -> Option<BuiltinUrl> {
+    match url.to_lowercase().as_str() {
+        "about:blank" => Some(BuiltinUrl::AboutBlank),
+        _ => None,
     }
 }
 

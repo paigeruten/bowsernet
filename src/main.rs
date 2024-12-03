@@ -28,7 +28,10 @@ async fn main() -> color_eyre::Result<()> {
 
     let mut browser = Browser::new()?;
 
-    let url = Url::parse(args.get(1).unwrap_or(&DEFAULT_URL.to_string()))?;
+    let url = Url::parse(args.get(1).unwrap_or(&DEFAULT_URL.to_string())).unwrap_or_else(|error| {
+        tracing::error!("Invalid URL: {}", error);
+        Url::parse("about:blank").unwrap()
+    });
     browser.load(&url)?;
 
     let mut frame: u64 = 0;
