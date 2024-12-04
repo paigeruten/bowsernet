@@ -241,6 +241,7 @@ struct DisplayItem {
 
 struct Layout<'a> {
     display_list: Vec<DisplayItem>,
+    line: Vec<DisplayItem>,
     font_group: &'a FontGroup,
     cursor_x: f32,
     cursor_y: f32,
@@ -255,6 +256,7 @@ impl<'a> Layout<'a> {
     pub fn new(screen_width: i32, font_group: &'a FontGroup) -> Self {
         Self {
             display_list: Vec::new(),
+            line: Vec::new(),
             font_group,
             cursor_x: PADDING as f32,
             cursor_y: PADDING as f32,
@@ -279,6 +281,7 @@ impl<'a> Layout<'a> {
                 }
             }
         }
+        self.flush_line();
     }
 
     fn process_text(&mut self, text: &str) {
@@ -290,9 +293,9 @@ impl<'a> Layout<'a> {
         };
         let font = self.font_group.get(style);
         for word in text.split_whitespace() {
-            self.display_list.push(DisplayItem {
+            self.line.push(DisplayItem {
                 x: self.cursor_x,
-                y: self.cursor_y,
+                y: 0.,
                 word: word.to_string(),
                 style,
                 font_size: self.font_size,
@@ -300,8 +303,7 @@ impl<'a> Layout<'a> {
             let dimensions = measure_text(word, Some(font), self.font_size, 1.);
             self.cursor_x += dimensions.width + self.space_width();
             if self.cursor_x >= (self.screen_width - PADDING) as f32 {
-                self.cursor_y += self.line_height();
-                self.cursor_x = PADDING as f32;
+                self.flush_line();
             }
         }
     }
@@ -312,11 +314,10 @@ impl<'a> Layout<'a> {
         } else if tag == "/head" {
             self.in_head = false;
         } else if tag == "br" || tag == "br /" || tag == "br/" {
-            self.cursor_x = PADDING as f32;
-            self.cursor_y += self.line_height();
+            self.flush_line();
         } else if tag == "/p" {
-            self.cursor_x = PADDING as f32;
-            self.cursor_y += self.line_height() * 2.;
+            self.flush_line();
+            self.cursor_y += FONT_SIZE as f32;
         } else if tag == "i" || tag == "em" {
             self.italic = true;
         } else if tag == "/i" || tag == "/em" {
@@ -336,12 +337,46 @@ impl<'a> Layout<'a> {
         }
     }
 
-    fn space_width(&self) -> f32 {
-        measure_text(" ", Some(&self.font_group.normal), self.font_size, 1.).width
+    fn flush_line(&mut self) {
+        if self.line.is_empty() {
+            return;
+        }
+
+        let metrics: Vec<TextDimensions> = self
+            .line
+            .iter()
+            .map(|item| {
+                measure_text(
+                    &item.word,
+                    Some(self.font_group.get(item.style)),
+                    item.font_size,
+                    1.,
+                )
+            })
+            .collect();
+
+        let max_ascent = metrics.iter().map(|dim| dim.offset_y as i32).max().unwrap() as f32;
+        let baseline = self.cursor_y + 1.25 * max_ascent;
+
+        for item in self.line.drain(..) {
+            self.display_list.push(DisplayItem {
+                y: baseline,
+                ..item
+            })
+        }
+
+        let max_descent = metrics
+            .iter()
+            .map(|dim| (dim.height - dim.offset_y) as i32)
+            .max()
+            .unwrap() as f32;
+
+        self.cursor_y = baseline + 1.25 * max_descent;
+        self.cursor_x = PADDING as f32;
     }
 
-    fn line_height(&self) -> f32 {
-        measure_text("X", Some(&self.font_group.normal), self.font_size, 1.).height * 1.75
+    fn space_width(&self) -> f32 {
+        measure_text(" ", Some(&self.font_group.normal), self.font_size, 1.).width
     }
 
     pub fn take_display_list(self) -> Vec<DisplayItem> {
