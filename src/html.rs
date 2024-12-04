@@ -1,39 +1,67 @@
-pub fn lex(body: &str) -> String {
+#[derive(Debug)]
+pub enum Token {
+    Tag(String),
+    Text(String),
+}
+
+pub fn lex(body: &str) -> Vec<Token> {
+    let mut out = Vec::new();
     let mut in_tag = false;
     let mut in_entity = false;
+    let mut buffer = String::new();
     let mut entity = String::new();
-    let mut text = String::new();
     for c in body.chars() {
         if c == '<' {
             in_tag = true;
+            if in_entity {
+                buffer.push('&');
+                buffer.push_str(&entity);
+                entity.clear();
+                in_entity = false;
+            }
+            if !buffer.is_empty() {
+                out.push(Token::Text(buffer.clone()));
+                buffer.clear();
+            }
         } else if c == '>' {
             in_tag = false;
-        } else if c == '&' {
+            out.push(Token::Tag(buffer.to_lowercase()));
+            buffer.clear();
+        } else if c == '&' && !in_tag {
             in_entity = true;
         } else if in_entity && !in_tag {
             if c.is_ascii_alphanumeric() {
                 entity.push(c);
             } else if c == ';' {
                 if let Some(translated) = translate_entity(&entity) {
-                    text.push_str(translated);
+                    buffer.push_str(translated);
                 } else {
-                    text.push('&');
-                    text.push_str(&entity);
-                    text.push(';');
+                    buffer.push('&');
+                    buffer.push_str(&entity);
+                    buffer.push(';');
                 }
                 in_entity = false;
                 entity.clear();
             } else {
-                text.push('&');
-                text.push_str(&entity);
+                buffer.push('&');
+                buffer.push_str(&entity);
                 in_entity = false;
                 entity.clear();
             }
-        } else if !in_tag {
-            text.push(c);
+        } else {
+            buffer.push(c);
         }
     }
-    text
+    if !in_tag {
+        if in_entity {
+            buffer.push('&');
+            buffer.push_str(&entity);
+        }
+        if !buffer.is_empty() {
+            out.push(Token::Text(buffer));
+        }
+    }
+    out
 }
 
 fn translate_entity(entity: &str) -> Option<&str> {
