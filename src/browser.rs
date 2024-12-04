@@ -91,7 +91,14 @@ impl Browser {
     }
 
     pub fn draw(&mut self) {
-        for DisplayItem { x, y, word, style } in self.display_list.iter() {
+        for DisplayItem {
+            x,
+            y,
+            word,
+            style,
+            font_size,
+        } in self.display_list.iter()
+        {
             if *y as i32 > self.scroll + self.dimensions.height || *y as i32 + PADDING < self.scroll
             {
                 continue;
@@ -142,7 +149,7 @@ impl Browser {
                     y - self.scroll as f32,
                     TextParams {
                         font: Some(self.font_group.get(*style)),
-                        font_size: 20,
+                        font_size: *font_size,
                         color: BLACK,
                         ..Default::default()
                     },
@@ -229,6 +236,7 @@ struct DisplayItem {
     pub y: f32,
     pub word: String,
     pub style: FontStyle,
+    pub font_size: u16,
 }
 
 struct Layout<'a> {
@@ -239,8 +247,8 @@ struct Layout<'a> {
     screen_width: i32,
     bold: bool,
     italic: bool,
-    space_width: f32,
-    line_height: f32,
+    font_size: u16,
+    in_head: bool,
 }
 
 impl<'a> Layout<'a> {
@@ -253,8 +261,8 @@ impl<'a> Layout<'a> {
             screen_width,
             bold: false,
             italic: false,
-            space_width: measure_text(" ", Some(&font_group.normal), FONT_SIZE, 1.).width,
-            line_height: measure_text("X", Some(&font_group.normal), FONT_SIZE, 1.).height * 1.75,
+            font_size: FONT_SIZE,
+            in_head: false,
         }
     }
 
@@ -262,7 +270,9 @@ impl<'a> Layout<'a> {
         for token in tokens {
             match token {
                 Token::Text(text) => {
-                    self.process_text(text);
+                    if !self.in_head {
+                        self.process_text(text);
+                    }
                 }
                 Token::Tag(tag) => {
                     self.process_tag(tag);
@@ -285,23 +295,28 @@ impl<'a> Layout<'a> {
                 y: self.cursor_y,
                 word: word.to_string(),
                 style,
+                font_size: self.font_size,
             });
-            let dimensions = measure_text(word, Some(font), FONT_SIZE, 1.);
-            self.cursor_x += dimensions.width + self.space_width;
+            let dimensions = measure_text(word, Some(font), self.font_size, 1.);
+            self.cursor_x += dimensions.width + self.space_width();
             if self.cursor_x >= (self.screen_width - PADDING) as f32 {
-                self.cursor_y += self.line_height;
+                self.cursor_y += self.line_height();
                 self.cursor_x = PADDING as f32;
             }
         }
     }
 
     fn process_tag(&mut self, tag: &str) {
-        if tag == "br" || tag == "br /" || tag == "br/" {
+        if tag == "head" {
+            self.in_head = true;
+        } else if tag == "/head" {
+            self.in_head = false;
+        } else if tag == "br" || tag == "br /" || tag == "br/" {
             self.cursor_x = PADDING as f32;
-            self.cursor_y += self.line_height;
+            self.cursor_y += self.line_height();
         } else if tag == "/p" {
             self.cursor_x = PADDING as f32;
-            self.cursor_y += self.line_height * 2.;
+            self.cursor_y += self.line_height() * 2.;
         } else if tag == "i" || tag == "em" {
             self.italic = true;
         } else if tag == "/i" || tag == "/em" {
@@ -310,7 +325,23 @@ impl<'a> Layout<'a> {
             self.bold = true;
         } else if tag == "/b" || tag == "/strong" {
             self.bold = false;
+        } else if tag == "small" {
+            self.font_size -= 2;
+        } else if tag == "/small" {
+            self.font_size += 2;
+        } else if tag == "big" {
+            self.font_size += 4;
+        } else if tag == "/big" {
+            self.font_size -= 4;
         }
+    }
+
+    fn space_width(&self) -> f32 {
+        measure_text(" ", Some(&self.font_group.normal), self.font_size, 1.).width
+    }
+
+    fn line_height(&self) -> f32 {
+        measure_text("X", Some(&self.font_group.normal), self.font_size, 1.).height * 1.75
     }
 
     pub fn take_display_list(self) -> Vec<DisplayItem> {
