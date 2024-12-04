@@ -1,4 +1,5 @@
 use std::{
+    cell::RefCell,
     collections::{HashMap, HashSet},
     fs::File,
     io::read_to_string,
@@ -38,20 +39,7 @@ impl Browser {
         Ok(Self {
             connection_pool: ConnectionPool::new(),
             request_cache: RequestCache::new(),
-            font_group: FontGroup {
-                normal: load_ttf_font_from_bytes(include_bytes!(
-                    "../assets/fonts/Times New Roman.ttf"
-                ))?,
-                italic: load_ttf_font_from_bytes(include_bytes!(
-                    "../assets/fonts/Times New Roman Italic.ttf"
-                ))?,
-                bold: load_ttf_font_from_bytes(include_bytes!(
-                    "../assets/fonts/Times New Roman Bold.ttf"
-                ))?,
-                bold_italic: load_ttf_font_from_bytes(include_bytes!(
-                    "../assets/fonts/Times New Roman Bold Italic.ttf"
-                ))?,
-            },
+            font_group: FontGroup::new(),
             emoji_cache: HashMap::new(),
             supported_emojis: HashSet::from_iter(SUPPORTED_EMOJIS.chars()),
             display_tokens: Vec::new(),
@@ -204,7 +192,7 @@ impl Browser {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum FontStyle {
     Normal,
     Bold,
@@ -217,9 +205,30 @@ struct FontGroup {
     pub italic: Font,
     pub bold: Font,
     pub bold_italic: Font,
+    measure_cache: RefCell<HashMap<(String, u16, FontStyle), TextDimensions>>,
 }
 
 impl FontGroup {
+    pub fn new() -> Self {
+        Self {
+            normal: load_ttf_font_from_bytes(include_bytes!("../assets/fonts/Times New Roman.ttf"))
+                .unwrap(),
+            italic: load_ttf_font_from_bytes(include_bytes!(
+                "../assets/fonts/Times New Roman Italic.ttf"
+            ))
+            .unwrap(),
+            bold: load_ttf_font_from_bytes(include_bytes!(
+                "../assets/fonts/Times New Roman Bold.ttf"
+            ))
+            .unwrap(),
+            bold_italic: load_ttf_font_from_bytes(include_bytes!(
+                "../assets/fonts/Times New Roman Bold Italic.ttf"
+            ))
+            .unwrap(),
+            measure_cache: RefCell::new(HashMap::new()),
+        }
+    }
+
     pub fn get(&self, style: FontStyle) -> &Font {
         match style {
             FontStyle::Normal => &self.normal,
@@ -227,6 +236,14 @@ impl FontGroup {
             FontStyle::Italic => &self.italic,
             FontStyle::BoldItalic => &self.bold_italic,
         }
+    }
+
+    pub fn measure_text(&self, text: &str, font_size: u16, style: FontStyle) -> TextDimensions {
+        *self
+            .measure_cache
+            .borrow_mut()
+            .entry((text.to_string(), font_size, style))
+            .or_insert_with(|| measure_text(text, Some(self.get(style)), font_size, 1.))
     }
 }
 
@@ -291,7 +308,6 @@ impl<'a> Layout<'a> {
             (true, false) => FontStyle::Bold,
             (true, true) => FontStyle::BoldItalic,
         };
-        let font = self.font_group.get(style);
         for word in text.split_whitespace() {
             self.line.push(DisplayItem {
                 x: self.cursor_x,
@@ -300,8 +316,11 @@ impl<'a> Layout<'a> {
                 style,
                 font_size: self.font_size,
             });
-            let dimensions = measure_text(word, Some(font), self.font_size, 1.);
-            self.cursor_x += dimensions.width + self.space_width();
+            let text_width = self
+                .font_group
+                .measure_text(word, self.font_size, style)
+                .width;
+            self.cursor_x += text_width + self.space_width();
             if self.cursor_x >= (self.screen_width - PADDING) as f32 {
                 self.flush_line();
             }
@@ -346,12 +365,8 @@ impl<'a> Layout<'a> {
             .line
             .iter()
             .map(|item| {
-                measure_text(
-                    &item.word,
-                    Some(self.font_group.get(item.style)),
-                    item.font_size,
-                    1.,
-                )
+                self.font_group
+                    .measure_text(&item.word, item.font_size, item.style)
             })
             .collect();
 
@@ -376,7 +391,9 @@ impl<'a> Layout<'a> {
     }
 
     fn space_width(&self) -> f32 {
-        measure_text(" ", Some(&self.font_group.normal), self.font_size, 1.).width
+        self.font_group
+            .measure_text(" ", self.font_size, FontStyle::Normal)
+            .width
     }
 
     pub fn take_display_list(self) -> Vec<DisplayItem> {
