@@ -73,11 +73,11 @@ impl Browser {
     }
 
     fn reflow(&mut self) {
-        self.display_list = layout(
-            &self.display_tokens,
-            self.dimensions.width,
-            &self.font_group,
-        );
+        self.display_list = {
+            let mut layout = Layout::new(self.dimensions.width, &self.font_group);
+            layout.process_tokens(&self.display_tokens);
+            layout.take_display_list()
+        };
         self.scroll_max = self
             .display_list
             .iter()
@@ -223,6 +223,7 @@ impl FontGroup {
     }
 }
 
+#[derive(Debug, Clone)]
 struct DisplayItem {
     pub x: f32,
     pub y: f32,
@@ -230,57 +231,89 @@ struct DisplayItem {
     pub style: FontStyle,
 }
 
-fn layout(tokens: &[Token], screen_width: i32, font_group: &FontGroup) -> Vec<DisplayItem> {
-    let mut display_list = Vec::new();
-    let mut cursor_x = PADDING as f32;
-    let mut cursor_y = PADDING as f32;
-    let mut bold = false;
-    let mut italic = false;
-    let space_width = measure_text(" ", Some(&font_group.normal), FONT_SIZE, 1.).width;
-    let line_height = measure_text("X", Some(&font_group.normal), FONT_SIZE, 1.).height * 1.75;
-    for token in tokens {
-        match token {
-            Token::Text(text) => {
-                let style = match (bold, italic) {
-                    (false, false) => FontStyle::Normal,
-                    (false, true) => FontStyle::Italic,
-                    (true, false) => FontStyle::Bold,
-                    (true, true) => FontStyle::BoldItalic,
-                };
-                let font = font_group.get(style);
-                for word in text.split_whitespace() {
-                    display_list.push(DisplayItem {
-                        x: cursor_x,
-                        y: cursor_y,
-                        word: word.to_string(),
-                        style,
-                    });
-                    let dimensions = measure_text(word, Some(font), FONT_SIZE, 1.);
-                    cursor_x += dimensions.width + space_width;
-                    if cursor_x >= (screen_width - PADDING) as f32 {
-                        cursor_y += line_height;
-                        cursor_x = PADDING as f32;
-                    }
+struct Layout<'a> {
+    display_list: Vec<DisplayItem>,
+    font_group: &'a FontGroup,
+    cursor_x: f32,
+    cursor_y: f32,
+    screen_width: i32,
+    bold: bool,
+    italic: bool,
+    space_width: f32,
+    line_height: f32,
+}
+
+impl<'a> Layout<'a> {
+    pub fn new(screen_width: i32, font_group: &'a FontGroup) -> Self {
+        Self {
+            display_list: Vec::new(),
+            font_group,
+            cursor_x: PADDING as f32,
+            cursor_y: PADDING as f32,
+            screen_width,
+            bold: false,
+            italic: false,
+            space_width: measure_text(" ", Some(&font_group.normal), FONT_SIZE, 1.).width,
+            line_height: measure_text("X", Some(&font_group.normal), FONT_SIZE, 1.).height * 1.75,
+        }
+    }
+
+    pub fn process_tokens(&mut self, tokens: &[Token]) {
+        for token in tokens {
+            match token {
+                Token::Text(text) => {
+                    self.process_text(text);
                 }
-            }
-            Token::Tag(tag) => {
-                if tag == "br" || tag == "br /" || tag == "br/" {
-                    cursor_x = PADDING as f32;
-                    cursor_y += line_height;
-                } else if tag == "/p" {
-                    cursor_x = PADDING as f32;
-                    cursor_y += line_height * 2.;
-                } else if tag == "i" || tag == "em" {
-                    italic = true;
-                } else if tag == "/i" || tag == "/em" {
-                    italic = false;
-                } else if tag == "b" || tag == "strong" {
-                    bold = true;
-                } else if tag == "/b" || tag == "/strong" {
-                    bold = false;
+                Token::Tag(tag) => {
+                    self.process_tag(tag);
                 }
             }
         }
     }
-    display_list
+
+    fn process_text(&mut self, text: &str) {
+        let style = match (self.bold, self.italic) {
+            (false, false) => FontStyle::Normal,
+            (false, true) => FontStyle::Italic,
+            (true, false) => FontStyle::Bold,
+            (true, true) => FontStyle::BoldItalic,
+        };
+        let font = self.font_group.get(style);
+        for word in text.split_whitespace() {
+            self.display_list.push(DisplayItem {
+                x: self.cursor_x,
+                y: self.cursor_y,
+                word: word.to_string(),
+                style,
+            });
+            let dimensions = measure_text(word, Some(font), FONT_SIZE, 1.);
+            self.cursor_x += dimensions.width + self.space_width;
+            if self.cursor_x >= (self.screen_width - PADDING) as f32 {
+                self.cursor_y += self.line_height;
+                self.cursor_x = PADDING as f32;
+            }
+        }
+    }
+
+    fn process_tag(&mut self, tag: &str) {
+        if tag == "br" || tag == "br /" || tag == "br/" {
+            self.cursor_x = PADDING as f32;
+            self.cursor_y += self.line_height;
+        } else if tag == "/p" {
+            self.cursor_x = PADDING as f32;
+            self.cursor_y += self.line_height * 2.;
+        } else if tag == "i" || tag == "em" {
+            self.italic = true;
+        } else if tag == "/i" || tag == "/em" {
+            self.italic = false;
+        } else if tag == "b" || tag == "strong" {
+            self.bold = true;
+        } else if tag == "/b" || tag == "/strong" {
+            self.bold = false;
+        }
+    }
+
+    pub fn take_display_list(self) -> Vec<DisplayItem> {
+        self.display_list
+    }
 }
